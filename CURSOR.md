@@ -22,31 +22,39 @@ This document summarizes how the current flashcard generator works so Cursor (an
 
 #### 1. Wizard layout & overall look
 - The page background is a **soft multi-stop gradient**; the main content is a **white card** centered on the page, with rounded corners and drop shadow.
-- At the top of the card is a **3-step wizard header** implemented via a small `Step` component:
-  - **Step 1 – "Upload / paste"**
-  - **Step 2 – "Review & generate"**
-  - **Step 3 – "Play & share"**
-- Each step shows a numbered circle and label; active/done states change color.
+- At the top of the card is a **2-step wizard header** implemented via a small `Step` component:
+  - **Step 1 – "Create Flashcard"**
+  - **Step 2 – "Play & Share"**
+- Each step shows a numbered circle and label; the **current step** is visually highlighted:
+  - Larger, glowing number circle.
+  - Bolder label color.
+  - A connecting progress bar between steps that fills as you reach step 2.
 - Steps are **clickable buttons**:
   - Clicking **step 1** calls a restart handler that:
     - Reopens the creator (`showCreator = true`).
     - Clears `flashcards`, index, flip state, and URL hash.
     - Resets `sourceInfo` to the initial helper text.
-  - Clicking **step 2** reopens the creator for editing but **keeps existing text and cards**.
-  - Clicking **step 3** switches to play/share view if there are any flashcards.
 - The active step (`currentStep`) is derived from state:
-  - `1` when creator is open and there is no source.
-  - `2` when creator is open but there is some source text.
-  - `3` when creator is collapsed and there are flashcards.
+  - `1` when the creator is open.
+  - `2` when the creator is collapsed and there are flashcards.
+- Under the main heading (“Flashcard game generator”) there is a **context sentence** that changes by step:
+  - Step 1: “Create new flashcards from your spreadsheet or Excel file.”
+  - Step 2: “Your game is ready! Click to share or start playing.”
+- The layout is **mobile-friendly**:
+  - The main card width, paddings, and font sizes shrink on small viewports.
+  - The wizard header wraps nicely on narrow screens.
 
 #### 2. Data model
 - `spreadsheet: string` – full textarea contents.
 - `flashcards: Array<{ front: string; back: string }>` – normalized cards.
 - `currentIndex: number` – index in `flashcards`.
 - `showAnswer: boolean` – whether we currently show the answer side.
-- `isReversed: boolean` – random toggle that decides which side is question vs answer for the current card.
+- `isReversed: boolean` – whether the **back** is currently treated as the question (`true`) or the front (`false`).
 - `sourceInfo: string` – status message under the heading.
 - `showCreator: boolean` – whether the upload/paste panel is visible.
+- `shrinkScale: number` – scale factor used to gradually shrink the card before auto-advancing.
+- `randomMixEnabled: boolean` – controlled by a checkbox; when `true`, question/answer sides are randomized each card, otherwise they are fixed (front = question, back = answer).
+- `isMobile: boolean` – simple flag derived from `window.innerWidth` to tweak layout for small screens.
 
 #### 3. Parsing pasted text (`parseSpreadsheet`)
 - For each non-empty line:
@@ -84,25 +92,30 @@ This document summarizes how the current flashcard generator works so Cursor (an
   - If it matches `#data=...`, decodes the payload and uses it to seed `spreadsheet`.
   - Immediately parses it into `flashcards`, randomizes `isReversed`, resets index/flip state, and updates `sourceInfo` to indicate the deck came from URL.
 
-#### 6. Generate / clear buttons
-- Under the textarea in the creator panel there is a **horizontal button group**:
-  - **Clear inputs** (gray):
-    - Sets `spreadsheet` to empty, clears `flashcards`, index, flip state and `isReversed`.
-    - Resets `sourceInfo` to a “inputs cleared” message.
-    - Clears the URL hash as well.
-  - **Generate flashcards** (blue, CTA):
-    - Calls `handleGenerate()`.
-    - Uses `parseSpreadsheet()` to build the `flashcards` array.
-    - Resets index and flip state, randomizes `isReversed`.
-    - Updates URL hash from `spreadsheet`.
-    - Collapses the creator to show play/share state on success.
+#### 6. Generate / clear controls and randomization toggle
+- In the creator panel, below the textarea:
+  - A **“Randomly mix question/answers”** checkbox (checked by default):
+    - Binds to `randomMixEnabled`.
+    - When enabled, new cards and navigation will randomly flip which side is the question.
+    - When disabled, the **front** side is always shown as the question.
+  - A **horizontal button group**:
+    - **Clear inputs** (gray):
+      - Sets `spreadsheet` to empty, clears `flashcards`, index, flip state and `isReversed`.
+      - Resets `sourceInfo` to an “inputs cleared” message.
+      - Clears the URL hash as well.
+    - **Generate flashcards** (blue, CTA):
+      - Calls `handleGenerate()`.
+      - If the textarea is empty, automatically uses a **sample placeholder deck** (`apple, jablko` / `car, auto`) and writes it into `spreadsheet`.
+      - Uses `parseSpreadsheet()` to build the `flashcards` array and shuffles them.
+      - Resets index and flip state; sets `isReversed` based on `randomMixEnabled`.
+      - Updates the URL hash from the chosen source text.
+      - Collapses the creator to show the Play & Share state on success.
 
 #### 7. Play & share panel and card view
 - When `showCreator === false` and `flashcards.length > 0`:
   - A rounded **top panel** contains:
-    - `+ Create new flashcards` button – simply sets `showCreator = true` (keeps data).
-    - Center text: “Your flashcards game!”.
-    - **share** button – calls `handleShare()` which:
+    - A heading on the left: “Your flashcards game”.
+    - A **share** button on the right – calls `handleShare()` which:
       - Ensures URL hash is up to date.
       - Attempts to copy `window.location.href` to clipboard.
       - Falls back to messaging that the address bar has the link.
@@ -113,9 +126,16 @@ This document summarizes how the current flashcard generator works so Cursor (an
       - A light gradient background, pink accent border, drop shadow, and subtle 3D-style rotation that changes on hover.
       - A small **“Question” / “Answer”** pill in the top-right corner that reflects the current side.
     - Card content shows either **question** or **answer** depending on `showAnswer` and `isReversed`.
+    - When the answer is shown:
+      - It stays visible for ~10 seconds.
+      - After ~2 seconds it **gradually shrinks** (using `shrinkScale`) down to about 70% size and slightly fades, signaling that the card will disappear.
+      - At the end of the 10 seconds the game automatically:
+        - Advances to the next card,
+        - Hides the answer again,
+        - Picks a new `isReversed` value according to `randomMixEnabled`.
     - Sequences of repeated letters (e.g., `ll`, `tt`) are wrapped in a `<span>` with a light yellow background via `highlightDoubleLetters()`.
     - Controls: **Prev**, **Next**, **Show Question / Show Answer**.
-    - Moving between cards re-randomizes `isReversed` and always hides the answer first.
+    - Moving between cards re-randomizes `isReversed` (subject to `randomMixEnabled`) and always hides the answer first.
 
 ### Things to be careful about in future edits
 - `index.html` mixes **layout**, **logic**, and **state** in one file; large structural refactors should first split the script into a separate `.js` file.

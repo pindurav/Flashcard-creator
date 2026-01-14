@@ -30,6 +30,9 @@
         const [isReversed, setIsReversed] = useState(false); // false: front->question, true: back->question
         const [sourceInfo, setSourceInfo] = useState("Paste CSV / tab text or load an .xlsx file.");
         const [showCreator, setShowCreator] = useState(true);
+        const [shrinkScale, setShrinkScale] = useState(1.0); // For gradual shrinking during auto-advance
+        const [randomMixEnabled, setRandomMixEnabled] = useState(true); // Checkbox for randomizing question/answer
+        const [isMobile, setIsMobile] = useState(false); // For responsive tweaks
 
         function shuffleArray(array) {
           const copy = [...array];
@@ -41,23 +44,33 @@
         }
 
         function Step({ number, label, isActive, isDone, onClick }) {
+          const isCompleted = isDone && !isActive;
           const circleStyle = {
-            width: 32,
-            height: 32,
+            width: isActive ? 34 : 30,
+            height: isActive ? 34 : 30,
             borderRadius: "50%",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            border: "2px solid #1f3c88",
-            background: isActive || isDone ? "#1f3c88" : "#ffffff",
-            color: isActive || isDone ? "#ffffff" : "#1f3c88",
+            border: `2px solid ${isActive ? "#1f3c88" : isCompleted ? "#4caf50" : "#c5cee5"}`,
+            background: isActive
+              ? "#1f3c88"
+              : isCompleted
+              ? "#4caf50"
+              : "#ffffff",
+            color: isActive || isCompleted ? "#ffffff" : "#1f3c88",
             fontWeight: "bold",
+            boxShadow: isActive ? "0 0 0 4px rgba(31,60,136,0.12)" : "none",
+            transition: "all 0.18s ease",
           };
           const labelStyle = {
             marginTop: 6,
+            padding: "0 0.6rem",
             fontSize: 12,
-            color: isActive || isDone ? "#1f3c88" : "#777",
+            color: isActive ? "#1f3c88" : isCompleted ? "#4caf50" : "#777",
             textAlign: "center",
+            fontWeight: isActive ? 600 : 500,
+            whiteSpace: "nowrap",
           };
           return (
             <div
@@ -66,6 +79,9 @@
                 flexDirection: "column",
                 alignItems: "center",
                 cursor: onClick ? "pointer" : "default",
+                padding: "0.2rem 0.7rem",
+                borderRadius: 999,
+                backgroundColor: isActive ? "rgba(31,60,136,0.05)" : "transparent",
               }}
               onClick={onClick || undefined}
             >
@@ -118,6 +134,20 @@
             .filter((card) => card.front && card.back);
         }
 
+        // Track viewport size for simple mobile-friendly tweaks
+        useEffect(() => {
+          function handleResize() {
+            try {
+              setIsMobile(window.innerWidth <= 640);
+            } catch {
+              setIsMobile(false);
+            }
+          }
+          handleResize();
+          window.addEventListener("resize", handleResize);
+          return () => window.removeEventListener("resize", handleResize);
+        }, []);
+
         // On first load, try to restore from URL hash (#data=...)
         useEffect(() => {
           try {
@@ -131,7 +161,7 @@
               if (cards.length > 0) {
                 setCurrentIndex(0);
                 setShowAnswer(false);
-                setIsReversed(Math.random() < 0.5);
+                setIsReversed(randomMixEnabled ? Math.random() < 0.5 : false);
                 setSourceInfo(`Loaded ${cards.length} cards from URL`);
                 // When opening from a shared link, go straight to the Play tab
                 setShowCreator(false);
@@ -203,9 +233,9 @@
                 setFlashcards(cards);
                 setCurrentIndex(0);
                 setShowAnswer(false);
-                setIsReversed(Math.random() < 0.5);
+                setIsReversed(randomMixEnabled ? Math.random() < 0.5 : false);
                 updateUrlFromSpreadsheet(text);
-                setSourceInfo(`Loaded ${cards.length} cards from “${file.name}”`);
+                setSourceInfo(`Loaded ${cards.length} cards from "${file.name}"`);
                 setShowCreator(false);
               } else {
                 setFlashcards([]);
@@ -223,15 +253,25 @@
           reader.readAsArrayBuffer(file);
         }
 
+        const placeholderSample = "apple, jablko\ncar, auto";
+
         function handleGenerate() {
-          const cards = shuffleArray(parseSpreadsheet(spreadsheet));
+          const sourceText = (spreadsheet || "").trim().length === 0 ? placeholderSample : spreadsheet;
+          if ((spreadsheet || "").trim().length === 0) {
+            setSpreadsheet(placeholderSample);
+          }
+          const cards = shuffleArray(parseSpreadsheet(sourceText));
           setFlashcards(cards);
           setCurrentIndex(0);
           setShowAnswer(false);
-          setIsReversed(Math.random() < 0.5);
-          updateUrlFromSpreadsheet(spreadsheet);
+          setIsReversed(randomMixEnabled ? Math.random() < 0.5 : false);
+          updateUrlFromSpreadsheet(sourceText);
           if (cards.length > 0) {
-            setSourceInfo(`Generated ${cards.length} cards from text`);
+            setSourceInfo(
+              sourceText === placeholderSample
+                ? `Generated ${cards.length} cards from sample text`
+                : `Generated ${cards.length} cards from text`
+            );
             setShowCreator(false);
           } else {
             setSourceInfo(
@@ -273,7 +313,8 @@
           if (flashcards.length > 0) {
             setCurrentIndex((idx) => (idx + 1) % flashcards.length);
             setShowAnswer(false);
-            setIsReversed(Math.random() < 0.5);
+            setIsReversed(randomMixEnabled ? Math.random() < 0.5 : false);
+            setShrinkScale(1.0); // Reset scale when manually navigating
           }
         }
 
@@ -281,20 +322,54 @@
           if (flashcards.length > 0) {
             setCurrentIndex((idx) => (idx - 1 + flashcards.length) % flashcards.length);
             setShowAnswer(false);
-            setIsReversed(Math.random() < 0.5);
+            setIsReversed(randomMixEnabled ? Math.random() < 0.5 : false);
+            setShrinkScale(1.0); // Reset scale when manually navigating
           }
         }
 
         function handleFlip() {
-          setShowAnswer((s) => !s);
+          setShowAnswer((s) => {
+            if (!s) {
+              // When showing answer, start shrinking
+              setShrinkScale(1.0);
+            } else {
+              // When hiding answer, reset scale
+              setShrinkScale(1.0);
+            }
+            return !s;
+          });
         }
 
         // After revealing the answer, keep it visible for a while, then move to the next card.
+        // Also gradually shrink the card during the last part of that time.
         useEffect(() => {
-          if (!showAnswer || flashcards.length === 0) return;
+          if (!showAnswer || flashcards.length === 0) {
+            setShrinkScale(1.0); // Reset scale when answer is hidden
+            return;
+          }
 
           const indexAtStart = currentIndex;
           const total = flashcards.length;
+          const duration = 10000; // total: 10 seconds
+          const shrinkDelay = 2000; // wait 2 seconds before starting shrink
+          const shrinkDuration = duration - shrinkDelay; // 6 seconds of shrinking
+          const startTime = Date.now();
+          const startScale = 1.0;
+          const endScale = 0.7; // Shrink to 70% of original size
+
+          // Update scale smoothly over time
+          const interval = setInterval(() => {
+            const elapsed = Date.now() - startTime;
+            if (elapsed <= shrinkDelay) {
+              // First phase: keep full size
+              setShrinkScale(1.0);
+            } else {
+              const shrinkElapsed = elapsed - shrinkDelay;
+              const progress = Math.min(shrinkElapsed / shrinkDuration, 1.0);
+              const scale = startScale - (startScale - endScale) * progress;
+              setShrinkScale(scale);
+            }
+          }, 50); // Update every 50ms for smooth animation
 
           const timer = setTimeout(() => {
             // Only auto-advance if we're still on the same card and still showing the answer
@@ -303,11 +378,15 @@
               return (idx + 1) % total;
             });
             setShowAnswer(false);
-            setIsReversed(Math.random() < 0.5);
-          }, 10000); // 10 seconds
+            setIsReversed(randomMixEnabled ? Math.random() < 0.5 : false);
+            setShrinkScale(1.0); // Reset scale for next card
+          }, duration);
 
-          return () => clearTimeout(timer);
-        }, [showAnswer, currentIndex, flashcards.length]);
+          return () => {
+            clearTimeout(timer);
+            clearInterval(interval);
+          };
+        }, [showAnswer, currentIndex, flashcards.length, randomMixEnabled]);
 
         // Highlight sequences of double letters (ll, tt, etc.) to draw attention.
         function highlightDoubleLetters(text) {
@@ -335,42 +414,69 @@
           return result;
         }
 
-        // Determine which step is active for the wizard header
-        const hasSource = (spreadsheet || "").trim().length > 0;
+        // Determine which step is active for the wizard header (2 steps: Create Flashcard, Play & Share)
         const hasCards = flashcards.length > 0;
         let currentStep = 1;
         if (showCreator) {
-          currentStep = hasSource ? 2 : 1;
+          currentStep = 1; // Create Flashcard
         } else if (hasCards) {
-          currentStep = 3;
+          currentStep = 2; // Play & Share
         }
+
+        const stepSubtitle =
+          currentStep === 1
+            ? "Create new flashcards from your spreadsheet or Excel file."
+            : "Your game is ready! Click to share or start playing.";
 
         return (
           <div
             style={{
-              maxWidth: 900,
-              margin: "3rem auto",
-              padding: "2rem 2.5rem 2.5rem",
+              maxWidth: isMobile ? 520 : 900,
+              margin: isMobile ? "1.25rem auto" : "2.25rem auto",
+              padding: isMobile ? "1.25rem 1rem 1.75rem" : "1.75rem 1.5rem 2.25rem",
               background: "#ffffff",
               borderRadius: 24,
               boxShadow: "0 18px 40px rgba(0,0,0,0.18)",
+              boxSizing: "border-box",
             }}
           >
-            <h2 style={{ marginTop: 0, marginBottom: "1.5rem", color: "#1f3c88" }}>
-              Flashcard game! (Eg english - Czech learning helper)
+            <h2
+              style={{
+                marginTop: 0,
+                marginBottom: "0.5rem",
+                color: "#1f3c88",
+                fontSize: isMobile ? "1.35rem" : "1.6rem",
+                textAlign: isMobile ? "center" : "left",
+              }}
+            >
+              Flashcard game generator
             </h2>
+            <p
+              style={{
+                marginTop: 0,
+                marginBottom: "1.5rem",
+                fontSize: "0.9rem",
+                color: "#46546b",
+                textAlign: isMobile ? "center" : "left",
+              }}
+            >
+              {stepSubtitle}
+            </p>
 
             <div
                   style={{
                     display: "flex",
                     alignItems: "center",
-                    marginBottom: "2rem",
+                    justifyContent: "space-between",
+                    marginBottom: "1.25rem",
                     columnGap: 16,
+                    rowGap: 10,
+                    flexWrap: "wrap",
                   }}
                 >
               <Step
                     number={1}
-                    label="Upload / paste"
+                    label="Create Flashcard"
                     isActive={currentStep === 1}
                     isDone={currentStep > 1}
                     onClick={handleRestartWizard}
@@ -378,33 +484,25 @@
               <div
                     style={{
                       flex: 1,
-                      height: 2,
+                      height: 3,
+                      minWidth: isMobile ? 40 : 80,
+                      borderRadius: 999,
                       background:
-                        currentStep > 1 ? "#1f3c88" : "linear-gradient(to right,#1f3c88 0%,#ddd 100%)",
+                        currentStep > 1
+                          ? "linear-gradient(to right,#1f3c88 0%,#4caf50 100%)"
+                          : "linear-gradient(to right,#1f3c88 0%,#dde3f5 60%,#dde3f5 100%)",
                     }}
               />
               <Step
                     number={2}
-                    label="Review & generate"
+                    label="Play & Share"
                     isActive={currentStep === 2}
-                    isDone={currentStep > 2}
-                  />
-                  <div
-                    style={{
-                      flex: 1,
-                      height: 2,
-                      background:
-                        currentStep > 2 ? "#1f3c88" : "linear-gradient(to right,#1f3c88 0%,#ddd 100%)",
-                    }}
-                  />
-                  <Step
-                    number={3}
-                    label="Play & share"
-                    isActive={currentStep === 3}
                     isDone={false}
               />
             </div>
-            <p style={{ fontSize: "0.9rem", color: "#555" }}>{sourceInfo}</p>
+            <p style={{ fontSize: "0.86rem", color: "#777", marginBottom: "1rem" }}>
+              {sourceInfo}
+            </p>
 
             {showCreator ? (
               <div
@@ -442,6 +540,17 @@
                   placeholder={"apple, jablko\ncar, auto"}
                   style={{ width: "100%", fontFamily: "monospace", fontSize: "1rem" }}
                 ></textarea>
+                <div style={{ margin: "1rem 0" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.75rem" }}>
+                    <input
+                      type="checkbox"
+                      checked={randomMixEnabled}
+                      onChange={(e) => setRandomMixEnabled(e.target.checked)}
+                      style={{ width: "18px", height: "18px", cursor: "pointer" }}
+                    />
+                    <span style={{ fontSize: "0.95rem" }}>Randomly mix question/answers</span>
+                  </label>
+                </div>
                 <div style={{ margin: "1rem 0", display: "flex", gap: "0.75rem" }}>
                   <button
                     type="button"
@@ -486,8 +595,6 @@
             ) : (
               <div
                 style={{
-                  background: "#f7f9fc",
-                  border: "2px solid #333",
                   borderRadius: 30,
                   padding: "1.5rem",
                   marginBottom: "1.5rem",
@@ -496,22 +603,8 @@
                   alignItems: "center",
                 }}
               >
-                <button
-                  onClick={() => setShowCreator(true)}
-                  style={{
-                    borderRadius: 999,
-                    padding: "0.5rem 1.2rem",
-                    border: "2px solid #333",
-                    background: "white",
-                    cursor: "pointer",
-                    fontWeight: "bold",
-                    marginRight: "1rem",
-                  }}
-                >
-                  + Create new flashcards
-                </button>
-                <div style={{ flex: 1, textAlign: "center", fontStyle: "italic" }}>
-                  Your flashcards game!
+                <div style={{ flex: 1,  }}>
+                  <h2>Your flashcards game</h2>
                 </div>
                 <button
                   onClick={handleShare}
@@ -556,21 +649,21 @@
                     transition:
                       "transform 0.25s ease, box-shadow 0.18s ease, opacity 0.25s ease",
                     transform: showAnswer
-                      ? "rotateY(6deg) scale(0.97)"
+                      ? `rotateY(6deg) scale(${0.97 * shrinkScale})`
                       : "rotateY(-4deg) scale(1)",
-                    opacity: showAnswer ? 0.9 : 1,
+                    opacity: showAnswer ? 0.9 * shrinkScale : 1,
                   }}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.transform =
-                      (showAnswer ? "rotateY(6deg)" : "rotateY(-4deg)") +
-                      " translateY(-3px)";
-                    e.currentTarget.style.boxShadow = "0 18px 40px rgba(0,0,0,0.18)";
+                    if (!showAnswer) {
+                      e.currentTarget.style.transform = "rotateY(-4deg) translateY(-3px)";
+                      e.currentTarget.style.boxShadow = "0 18px 40px rgba(0,0,0,0.18)";
+                    }
                   }}
                   onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = showAnswer
-                      ? "rotateY(6deg) scale(0.97)"
-                      : "rotateY(-4deg) scale(1)";
-                    e.currentTarget.style.boxShadow = "0 14px 30px rgba(0,0,0,0.12)";
+                    if (!showAnswer) {
+                      e.currentTarget.style.transform = "rotateY(-4deg) scale(1)";
+                      e.currentTarget.style.boxShadow = "0 14px 30px rgba(0,0,0,0.12)";
+                    }
                   }}
                   onClick={handleFlip}
                   title="Click to flip"
