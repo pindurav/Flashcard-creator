@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Flashcard Generator</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body {
+        margin: 0;
+        background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 35%, #a18cd1 70%, #fbc2eb 100%);
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+    </style>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="text/babel">
+      const { useState, useEffect } = React;
+
+      // Simple flashcard generator webapp
+      function FlashcardApp() {
+        const [spreadsheet, setSpreadsheet] = useState("");
+        const [flashcards, setFlashcards] = useState([]);
+        const [currentIndex, setCurrentIndex] = useState(0);
+        const [showAnswer, setShowAnswer] = useState(false);
+        const [isReversed, setIsReversed] = useState(false); // false: front->question, true: back->question
+        const [sourceInfo, setSourceInfo] = useState("Paste CSV / tab text or load an .xlsx file.");
+        const [showCreator, setShowCreator] = useState(true);
+
+        function Step({ number, label, isActive, isDone, onClick }) {
+          const circleStyle = {
+            width: 32,
+            height: 32,
+            borderRadius: "50%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            border: "2px solid #1f3c88",
+            background: isActive || isDone ? "#1f3c88" : "#ffffff",
+            color: isActive || isDone ? "#ffffff" : "#1f3c88",
+            fontWeight: "bold",
+          };
+          const labelStyle = {
+            marginTop: 6,
+            fontSize: 12,
+            color: isActive || isDone ? "#1f3c88" : "#777",
+            textAlign: "center",
+          };
+          return (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                cursor: onClick ? "pointer" : "default",
+              }}
+              onClick={onClick || undefined}
+            >
+              <div style={circleStyle}>{number}</div>
+              <div style={labelStyle}>{label}</div>
+            </div>
+          );
+        }
+
+        function updateUrlFromSpreadsheet(text) {
+          try {
+            const encoded = encodeURIComponent(text || "");
+            if (encoded) {
+              window.location.hash = "data=" + encoded;
+            } else {
+              window.location.hash = "";
+            }
+          } catch (e) {
+            console.error("Failed to encode data into URL", e);
+          }
+        }
+
+        function parseSpreadsheet(text) {
+          const lines = text
+            .split("\n")
+            .map((line) => line.trim())
+            .filter(Boolean);
+
+          return lines
+            .map((line) => {
+              // Prefer explicit separators first: comma or tab
+              let parts = line.split(/,|\t/).map((p) => p.trim()).filter(Boolean);
+
+              // If we didn't get both sides, fall back to "columns" by spaces:
+              // treat the last chunk as the answer and everything before as the question.
+              if (parts.length < 2) {
+                const tokens = line.split(/\s+/).filter(Boolean);
+                if (tokens.length >= 2) {
+                  const back = tokens[tokens.length - 1];
+                  const front = tokens.slice(0, -1).join(" ");
+                  parts = [front, back];
+                }
+              }
+
+              return {
+                front: parts[0] || "",
+                back: parts[1] || "",
+              };
+            })
+            .filter((card) => card.front && card.back);
+        }
+
+        // On first load, try to restore from URL hash (#data=...)
+        useEffect(() => {
+          try {
+            const hash = window.location.hash || "";
+            const match = hash.match(/^#?data=(.*)$/);
+            if (match && match[1]) {
+              const decoded = decodeURIComponent(match[1]);
+              setSpreadsheet(decoded);
+              const cards = parseSpreadsheet(decoded);
+              setFlashcards(cards);
+              if (cards.length > 0) {
+                setCurrentIndex(0);
+                setShowAnswer(false);
+                setIsReversed(Math.random() < 0.5);
+                setSourceInfo(`Loaded ${cards.length} cards from URL`);
+              }
+            }
+          } catch (e) {
+            console.error("Failed to parse data from URL", e);
+          }
+        }, []);
+
+        // Parse first sheet of an uploaded XLSX file.
+        // Robust: uses non-empty columns as "cells", first cell(s) = question, last cell = answer.
+        function parseXlsxToFlashcards(workbook) {
+          const sheetName = workbook.SheetNames[0];
+          const sheet = workbook.Sheets[sheetName];
+          const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+          const cards = rows
+            .map((row) => {
+              if (!row || row.length === 0) return null;
+
+              // Take all non-empty cells in the row
+              const cells = row
+                .map((cell) => (cell == null ? "" : cell.toString().trim()))
+                .filter((v) => v.length > 0);
+
+              // Need at least two non-empty cells to form a pair
+              if (cells.length < 2) return null;
+
+              // If we have 3+ cells, treat [0] + [1] as word + IPA, last as translation.
+              // If we have exactly 2, treat first as "question" (can already contain IPA),
+              // last as translation/answer.
+              let front;
+              let back;
+
+              if (cells.length >= 3) {
+                front = `${cells[0]}  ${cells[1]}`;
+                back = cells[cells.length - 1];
+              } else {
+                front = cells[0];
+                back = cells[1];
+              }
+
+              if (!front || !back) return null;
+
+              return { front, back };
+            })
+            .filter(Boolean);
+
+          return cards;
+        }
+
+        function handleXlsxChange(event) {
+          const file = event.target.files && event.target.files[0];
+          if (!file) return;
+
+          const reader = new FileReader();
+          reader.onload = function (e) {
+            try {
+              const data = new Uint8Array(e.target.result);
+              const workbook = XLSX.read(data, { type: "array" });
+              const cards = parseXlsxToFlashcards(workbook);
+              if (cards.length > 0) {
+                const text = cards
+                  .map((card) => `${card.front}\t${card.back}`)
+                  .join("\n");
+                setSpreadsheet(text);
+                setFlashcards(cards);
+                setCurrentIndex(0);
+                setShowAnswer(false);
+                setIsReversed(Math.random() < 0.5);
+                updateUrlFromSpreadsheet(text);
+                setSourceInfo(`Loaded ${cards.length} cards from “${file.name}”`);
+                setShowCreator(false);
+              } else {
+                setFlashcards([]);
+                setSpreadsheet("");
+                updateUrlFromSpreadsheet("");
+                setSourceInfo(
+                  `No usable rows found in “${file.name}”. Make sure you have columns: word | IPA | translation.`
+                );
+              }
+            } catch (err) {
+              console.error("Failed to read XLSX file", err);
+              setSourceInfo("Could not read that Excel file. Is it a valid .xlsx?");
+            }
+          };
+          reader.readAsArrayBuffer(file);
+        }
+
+        function handleGenerate() {
+          const cards = parseSpreadsheet(spreadsheet);
+          setFlashcards(cards);
+          setCurrentIndex(0);
+          setShowAnswer(false);
+          setIsReversed(Math.random() < 0.5);
+          updateUrlFromSpreadsheet(spreadsheet);
+          if (cards.length > 0) {
+            setSourceInfo(`Generated ${cards.length} cards from text`);
+            setShowCreator(false);
+          } else {
+            setSourceInfo(
+              "No valid pairs found. Use: word, translation OR word<TAB>translation per line."
+            );
+          }
+        }
+
+        function handleRestartWizard() {
+          setShowCreator(true);
+          setFlashcards([]);
+          setCurrentIndex(0);
+          setShowAnswer(false);
+          setIsReversed(false);
+          setSourceInfo("Paste CSV / tab text or load an .xlsx file.");
+          updateUrlFromSpreadsheet("");
+        }
+
+        function handleShare() {
+          try {
+            // Ensure URL reflects current source
+            updateUrlFromSpreadsheet(spreadsheet);
+            const url = window.location.href;
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(url).then(
+                () => setSourceInfo("Share link copied to clipboard."),
+                () => setSourceInfo("Share link ready in address bar (clipboard blocked).")
+              );
+            } else {
+              setSourceInfo("Share link ready in address bar (clipboard not available).");
+            }
+          } catch (e) {
+            console.error("Share failed", e);
+            setSourceInfo("Could not create share link, sorry.");
+          }
+        }
+
+        function handleNext() {
+          if (flashcards.length > 0) {
+            setCurrentIndex((idx) => (idx + 1) % flashcards.length);
+            setShowAnswer(false);
+            setIsReversed(Math.random() < 0.5);
+          }
+        }
+
+        function handlePrev() {
+          if (flashcards.length > 0) {
+            setCurrentIndex((idx) => (idx - 1 + flashcards.length) % flashcards.length);
+            setShowAnswer(false);
+            setIsReversed(Math.random() < 0.5);
+          }
+        }
+
+        function handleFlip() {
+          setShowAnswer((s) => !s);
+        }
+
+        // Highlight sequences of double letters (ll, tt, etc.) to draw attention.
+        function highlightDoubleLetters(text) {
+          if (!text) return "";
+          const result = [];
+          const regex = /(.)\1+/gi;
+          let lastIndex = 0;
+          let match;
+          while ((match = regex.exec(text)) !== null) {
+            const [sequence] = match;
+            const start = match.index;
+            if (start > lastIndex) {
+              result.push(text.slice(lastIndex, start));
+            }
+            result.push(
+              <span style={{ backgroundColor: "#fff3cd", padding: "0 2px" }} key={result.length}>
+                {sequence}
+              </span>
+            );
+            lastIndex = start + sequence.length;
+          }
+          if (lastIndex < text.length) {
+            result.push(text.slice(lastIndex));
+          }
+          return result;
+        }
+
+        // Determine which step is active for the wizard header
+        const hasSource = (spreadsheet || "").trim().length > 0;
+        const hasCards = flashcards.length > 0;
+        let currentStep = 1;
+        if (showCreator) {
+          currentStep = hasSource ? 2 : 1;
+        } else if (hasCards) {
+          currentStep = 3;
+        }
+
+        return (
+          <div
+            style={{
+              maxWidth: 900,
+              margin: "3rem auto",
+              padding: "2rem 2.5rem 2.5rem",
+              background: "#ffffff",
+              borderRadius: 24,
+              boxShadow: "0 18px 40px rgba(0,0,0,0.18)",
+            }}
+          >
+            <h2 style={{ marginTop: 0, marginBottom: "1.5rem", color: "#1f3c88" }}>
+              Flashcard Generator (English - Czech)
+            </h2>
+
+            <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    marginBottom: "2rem",
+                    columnGap: 16,
+                  }}
+                >
+              <Step
+                    number={1}
+                    label="Upload / paste"
+                    isActive={currentStep === 1}
+                    isDone={currentStep > 1}
+                    onClick={handleRestartWizard}
+              />
+              <div
+                    style={{
+                      flex: 1,
+                      height: 2,
+                      background:
+                        currentStep > 1 ? "#1f3c88" : "linear-gradient(to right,#1f3c88 0%,#ddd 100%)",
+                    }}
+              />
+              <Step
+                    number={2}
+                    label="Review & generate"
+                    isActive={currentStep === 2}
+                    isDone={currentStep > 2}
+                  />
+                  <div
+                    style={{
+                      flex: 1,
+                      height: 2,
+                      background:
+                        currentStep > 2 ? "#1f3c88" : "linear-gradient(to right,#1f3c88 0%,#ddd 100%)",
+                    }}
+                  />
+                  <Step
+                    number={3}
+                    label="Play & share"
+                    isActive={currentStep === 3}
+                    isDone={false}
+              />
+            </div>
+            <p style={{ fontSize: "0.9rem", color: "#555" }}>{sourceInfo}</p>
+
+            {showCreator ? (
+              <div
+                style={{
+                  background: "#f7f9fc",
+                  border: "2px solid #ccc",
+                  borderRadius: 16,
+                  padding: "1rem",
+                  marginBottom: "1.5rem",
+                }}
+              >
+                <p>
+                  Paste or type your spreadsheet here using CSV or tab, or upload an Excel file:
+                  <br />
+                  <small>
+                    Format: <code>hello, ahoj</code> (one pair per line)
+                  </small>
+                </p>
+                <label style={{ display: "block", margin: "0.5rem 0" }}>
+                  <strong>1. Load Excel (.xlsx) file</strong>
+                  <br />
+                  <input type="file" accept=".xlsx" onChange={handleXlsxChange} />
+                </label>
+
+                <hr style={{ margin: "1rem 0" }} />
+
+                <p style={{ marginTop: "0.5rem" }}>
+                  <strong>2. Or paste CSV / tab-separated text</strong>
+                </p>
+                <textarea
+                  rows={8}
+                  cols={40}
+                  value={spreadsheet}
+                  onChange={(e) => setSpreadsheet(e.target.value)}
+                  placeholder={"apple, jablko\ncar, auto"}
+                  style={{ width: "100%", fontFamily: "monospace", fontSize: "1rem" }}
+                ></textarea>
+                <div style={{ margin: "1rem 0", display: "flex", gap: "0.75rem" }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSpreadsheet("");
+                      setFlashcards([]);
+                      setCurrentIndex(0);
+                      setShowAnswer(false);
+                      setIsReversed(false);
+                      setSourceInfo("Inputs cleared. Paste CSV / tab text or load an .xlsx file.");
+                      updateUrlFromSpreadsheet("");
+                    }}
+                    style={{
+                      padding: "0.5rem 1.25rem",
+                      borderRadius: 999,
+                      border: "1px solid #ccc",
+                      background: "#f2f2f2",
+                      color: "#333",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Clear inputs
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleGenerate}
+                    style={{
+                      padding: "0.5rem 1.5rem",
+                      borderRadius: 999,
+                      border: "none",
+                      background: "#1f3c88",
+                      color: "#ffffff",
+                      fontWeight: "600",
+                      cursor: "pointer",
+                      boxShadow: "0 3px 8px rgba(0,0,0,0.18)",
+                    }}
+                  >
+                    Generate flashcards
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div
+                style={{
+                  background: "#f7f9fc",
+                  border: "2px solid #333",
+                  borderRadius: 30,
+                  padding: "1.5rem",
+                  marginBottom: "1.5rem",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }}
+              >
+                <button
+                  onClick={() => setShowCreator(true)}
+                  style={{
+                    borderRadius: 999,
+                    padding: "0.5rem 1.2rem",
+                    border: "2px solid #333",
+                    background: "white",
+                    cursor: "pointer",
+                    fontWeight: "bold",
+                    marginRight: "1rem",
+                  }}
+                >
+                  + Create new flashcards
+                </button>
+                <div style={{ flex: 1, textAlign: "center", fontStyle: "italic" }}>
+                  Your flashcards game!
+                </div>
+                <button
+                  onClick={handleShare}
+                  style={{
+                    borderRadius: 999,
+                    padding: "0.5rem 1.2rem",
+                    border: "2px solid #333",
+                    background: "white",
+                    cursor: "pointer",
+                    fontWeight: "bold",
+                    marginLeft: "1rem",
+                  }}
+                >
+                  share
+                </button>
+              </div>
+            )}
+
+            {currentStep >= 2 && flashcards.length > 0 && (
+              <div>
+                {(() => {
+                  const card = flashcards[currentIndex];
+                  const question = isReversed ? card.back : card.front;
+                  const answer = isReversed ? card.front : card.back;
+                  return (
+                <div
+                  style={{
+                    border: "2px solid #333",
+                    minHeight: 100,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "2rem",
+                    background: "#f9f9f9",
+                    cursor: "pointer",
+                    marginBottom: 16,
+                  }}
+                  onClick={handleFlip}
+                  title="Click to flip"
+                >
+                  {showAnswer
+                    ? highlightDoubleLetters(answer)
+                    : highlightDoubleLetters(question)}
+                </div>
+                  );
+                })()}
+                <div>
+                  <button onClick={handlePrev}>&larr; Prev</button>
+                  <span style={{ margin: "0 1rem" }}>
+                    Card {currentIndex + 1} / {flashcards.length}
+                  </span>
+                  <button onClick={handleNext}>Next &rarr;</button>
+                </div>
+                <p>
+                  <button onClick={handleFlip}>
+                    {showAnswer ? "Show Question" : "Show Answer"}
+                  </button>
+                </p>
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      const rootElement = document.getElementById("root");
+      const root = ReactDOM.createRoot(rootElement);
+      root.render(<FlashcardApp />);
+    </script>
+  </body>
+</html>
