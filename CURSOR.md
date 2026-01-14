@@ -85,12 +85,16 @@ This document summarizes how the current flashcard generator works so Cursor (an
 
 #### 5. URL-based sharing
 - Helper `updateUrlFromSpreadsheet(text)`:
-  - Encodes the full `spreadsheet` string using `encodeURIComponent` and stores it in `window.location.hash` as `#data=...`.
+  - Uses **LZString compression** (from CDN) to compress the `spreadsheet` string.
+  - Stores the compressed data in `window.location.hash` as `#lz=...` (much shorter than raw encoding).
+  - Falls back to `#data=...` format if compression is unavailable.
   - Clears the hash when the input is emptied.
 - On first render, a `useEffect` hook:
   - Reads `window.location.hash`.
-  - If it matches `#data=...`, decodes the payload and uses it to seed `spreadsheet`.
-  - Immediately parses it into `flashcards`, randomizes `isReversed`, resets index/flip state, and updates `sourceInfo` to indicate the deck came from URL.
+  - If it matches `#lz=...`, decompresses using `LZString.decompressFromEncodedURIComponent`.
+  - If it matches `#data=...`, uses `decodeURIComponent` (backward compatibility).
+  - Immediately parses the decoded text into `flashcards`, randomizes `isReversed`, resets index/flip state, and updates `sourceInfo` to indicate the deck came from URL.
+  - Automatically opens the Play & Share tab when loading from a shared URL.
 
 #### 6. Generate / clear controls and randomization toggle
 - In the creator panel, below the textarea:
@@ -116,10 +120,10 @@ This document summarizes how the current flashcard generator works so Cursor (an
   - A rounded **top panel** contains:
     - A heading on the left: “Your flashcards game”.
     - A **share** button on the right – calls `handleShare()` which:
-      - Ensures URL hash is up to date.
+      - Ensures URL hash is up to date (using compressed `#lz=...` format for shorter URLs).
       - Attempts to copy `window.location.href` to clipboard.
-      - Falls back to messaging that the address bar has the link.
-      - When you open the shared link, automatically open it on play tab
+      - Always shows the message: **"The URL copied!"** in `sourceInfo`.
+      - When you open the shared link, automatically opens it on the Play & Share tab.
   - Below that is the **active card** and controls:
     - Cards are **shuffled into a random order** when they are created (from pasted text, XLSX upload, or shared URL), so each game run feels a bit different.
     - The card surface is a playful, rounded rectangle with:
@@ -135,7 +139,11 @@ This document summarizes how the current flashcard generator works so Cursor (an
         - Picks a new `isReversed` value according to `randomMixEnabled`.
     - Sequences of repeated letters (e.g., `ll`, `tt`) are wrapped in a `<span>` with a light yellow background via `highlightDoubleLetters()`.
     - Controls: **Prev**, **Next**, **Show Question / Show Answer**.
-    - Moving between cards re-randomizes `isReversed` (subject to `randomMixEnabled`) and always hides the answer first.
+    - Clicking **Next** or **Prev** immediately displays the new card (no delay):
+      - Resets `shrinkScale` to 1.0,
+      - Hides the answer (`showAnswer = false`),
+      - Changes to the new card index,
+      - Randomizes `isReversed` (subject to `randomMixEnabled`).
 
 ### Things to be careful about in future edits
 - `index.html` mixes **layout**, **logic**, and **state** in one file; large structural refactors should first split the script into a separate `.js` file.

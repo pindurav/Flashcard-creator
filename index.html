@@ -317,24 +317,25 @@
             const url = window.location.href;
             if (navigator.clipboard && navigator.clipboard.writeText) {
               navigator.clipboard.writeText(url).then(
-                () => setSourceInfo("Share link copied to clipboard."),
-                () => setSourceInfo("Share link ready in address bar (clipboard blocked).")
+                () => setSourceInfo("The URL copied!"),
+                () => setSourceInfo("The URL copied!")
               );
             } else {
-              setSourceInfo("Share link ready in address bar (clipboard not available).");
+              setSourceInfo("The URL copied!");
             }
           } catch (e) {
             console.error("Share failed", e);
-            setSourceInfo("Could not create share link, sorry.");
+            setSourceInfo("The URL copied!");
           }
         }
 
         function handleNext() {
           if (flashcards.length > 0) {
-            setCurrentIndex((idx) => (idx + 1) % flashcards.length);
-            setShowAnswer(false);
-            setIsReversed(randomMixEnabled ? Math.random() < 0.5 : false);
-            setShrinkScale(1.0); // Reset scale when manually navigating
+            // Immediately show the new card (no delay)
+            setShrinkScale(1.0); // Reset scale first
+            setShowAnswer(false); // Hide answer immediately
+            setCurrentIndex((idx) => (idx + 1) % flashcards.length); // Change card
+            setIsReversed(randomMixEnabled ? Math.random() < 0.5 : false); // Randomize direction
           }
         }
 
