@@ -133,6 +133,8 @@
                 setShowAnswer(false);
                 setIsReversed(Math.random() < 0.5);
                 setSourceInfo(`Loaded ${cards.length} cards from URL`);
+                // When opening from a shared link, go straight to the Play tab
+                setShowCreator(false);
               }
             }
           } catch (e) {
@@ -517,22 +519,60 @@
                   return (
                 <div
                   style={{
-                    border: "2px solid #333",
-                    minHeight: 100,
+                    position: "relative",
+                    borderRadius: 24,
+                    border: "2px solid #ff6fb1",
+                    minHeight: 140,
+                    padding: "1.5rem 2rem",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
                     fontSize: "2rem",
-                    background: "#f9f9f9",
+                    background:
+                      "radial-gradient(circle at top left, #fff7f9 0%, #f7f9ff 45%, #f2f6ff 100%)",
                     cursor: "pointer",
-                    marginBottom: 16,
+                    marginBottom: 20,
+                    boxShadow: "0 14px 30px rgba(0,0,0,0.12)",
+                    transition: "transform 0.18s ease, box-shadow 0.18s ease",
+                    transform: showAnswer ? "rotateY(6deg)" : "rotateY(-4deg)",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform =
+                      (showAnswer ? "rotateY(6deg)" : "rotateY(-4deg)") +
+                      " translateY(-3px)";
+                    e.currentTarget.style.boxShadow = "0 18px 40px rgba(0,0,0,0.18)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = showAnswer
+                      ? "rotateY(6deg)"
+                      : "rotateY(-4deg)";
+                    e.currentTarget.style.boxShadow = "0 14px 30px rgba(0,0,0,0.12)";
                   }}
                   onClick={handleFlip}
                   title="Click to flip"
                 >
-                  {showAnswer
-                    ? highlightDoubleLetters(answer)
-                    : highlightDoubleLetters(question)}
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: 12,
+                      right: 18,
+                      padding: "0.1rem 0.7rem",
+                      borderRadius: 999,
+                      fontSize: "0.7rem",
+                      letterSpacing: "0.06em",
+                      textTransform: "uppercase",
+                      backgroundColor: showAnswer ? "#1f3c88" : "#ffb347",
+                      color: "#ffffff",
+                      boxShadow: "0 2px 6px rgba(0,0,0,0.18)",
+                    }}
+                  >
+                    {showAnswer ? "Answer" : "Question"}
+                  </div>
+                  <div style={{ textAlign: "center", lineHeight: 1.3 }}>
+                    {showAnswer
+                      ? highlightDoubleLetters(answer)
+                      : highlightDoubleLetters(question)}
+                  </div>
                 </div>
                   );
                 })()}

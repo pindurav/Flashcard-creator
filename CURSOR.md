@@ -20,8 +20,8 @@ This document summarizes how the current flashcard generator works so Cursor (an
 
 ### Core behaviors
 
-#### 1. Wizard layout
-- The page background is a **gradient**; the main content is a **white card** centered on the page, with rounded corners and drop shadow.
+#### 1. Wizard layout & overall look
+- The page background is a **soft multi-stop gradient**; the main content is a **white card** centered on the page, with rounded corners and drop shadow.
 - At the top of the card is a **3-step wizard header** implemented via a small `Step` component:
   - **Step 1 – "Upload / paste"**
   - **Step 2 – "Review & generate"**
@@ -106,9 +106,13 @@ This document summarizes how the current flashcard generator works so Cursor (an
       - Ensures URL hash is up to date.
       - Attempts to copy `window.location.href` to clipboard.
       - Falls back to messaging that the address bar has the link.
+      - When you open the shared link, automatically open it on play tab
   - Below that is the **active card** and controls:
-    - Randomly order the cards - so game is still a bit different
-    - Card surface shows either **question** or **answer** depending on `showAnswer` and `isReversed`.
+    - Cards are **shuffled into a random order** when they are created (from pasted text, XLSX upload, or shared URL), so each game run feels a bit different.
+    - The card surface is a playful, rounded rectangle with:
+      - A light gradient background, pink accent border, drop shadow, and subtle 3D-style rotation that changes on hover.
+      - A small **“Question” / “Answer”** pill in the top-right corner that reflects the current side.
+    - Card content shows either **question** or **answer** depending on `showAnswer` and `isReversed`.
     - Sequences of repeated letters (e.g., `ll`, `tt`) are wrapped in a `<span>` with a light yellow background via `highlightDoubleLetters()`.
     - Controls: **Prev**, **Next**, **Show Question / Show Answer**.
     - Moving between cards re-randomizes `isReversed` and always hides the answer first.
