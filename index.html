@@ -14,6 +14,8 @@
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- Simple text compression to keep share URLs shorter -->
+    <script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   </head>
   <body>
@@ -93,7 +95,17 @@
 
         function updateUrlFromSpreadsheet(text) {
           try {
-            const encoded = encodeURIComponent(text || "");
+            const raw = text || "";
+            // Prefer compressed format when possible to keep URLs shorter.
+            if (window.LZString && typeof window.LZString.compressToEncodedURIComponent === "function") {
+              const compressed = window.LZString.compressToEncodedURIComponent(raw);
+              if (compressed && compressed.length > 0) {
+                window.location.hash = "lz=" + compressed;
+                return;
+              }
+            }
+            // Fallback: plain URI encoding (legacy format).
+            const encoded = encodeURIComponent(raw);
             if (encoded) {
               window.location.hash = "data=" + encoded;
             } else {
@@ -148,13 +160,21 @@
           return () => window.removeEventListener("resize", handleResize);
         }, []);
 
-        // On first load, try to restore from URL hash (#data=...)
+        // On first load, try to restore from URL hash:
+        // - New format:  #lz=<compressed text with LZString.compressToEncodedURIComponent>
+        // - Legacy:      #data=<encodeURIComponent text>
         useEffect(() => {
           try {
             const hash = window.location.hash || "";
-            const match = hash.match(/^#?data=(.*)$/);
-            if (match && match[1]) {
-              const decoded = decodeURIComponent(match[1]);
+            const match = hash.match(/^#?(lz|data)=(.*)$/);
+            if (match && match[2]) {
+              const [, kind, payload] = match;
+              let decoded = "";
+              if (kind === "lz" && window.LZString && typeof window.LZString.decompressFromEncodedURIComponent === "function") {
+                decoded = window.LZString.decompressFromEncodedURIComponent(payload) || "";
+              } else {
+                decoded = decodeURIComponent(payload);
+              }
               setSpreadsheet(decoded);
               const cards = shuffleArray(parseSpreadsheet(decoded));
               setFlashcards(cards);
