@@ -3,8 +3,7 @@
 This document summarizes how the current flashcard generator works so Cursor (and future you) can safely modify it.
 
 ### Project location
-- Original working folder used in this session: `/Users/vladimir.pindura/Dev/poc/Flashcard creator`.
-- This `README` is stored under: `/Users/vladimir.pindura/Dev/private/flashcard-generator-README.md` because of environment write restrictions.
+- This `README` is stored under: `Flashcard creator/flashcard-generator-README.md` because of environment write restrictions.
 
 ### Stack and entry point
 - **Stack**: Plain browser app using React 18 and ReactDOM from CDN, compiled with in-browser Babel.
