@@ -1,4 +1,4 @@
-## Flashcard Generator (English–Czech) – Cursor Instructions
+## Flashcard game – English–Czech learning helper (Cursor Instructions)
 
 This document summarizes how the current flashcard generator works so Cursor (and future you) can safely modify it.
 
@@ -18,7 +18,7 @@ This document summarizes how the current flashcard generator works so Cursor (an
   3. Open `http://localhost:4174` in a browser.
 - You can also open `index.html` directly without a server, but some browsers may restrict clipboard APIs.
 
-### Core behaviors
+### Core behaviors (Flashcard game)
 
 #### 1. Wizard layout & overall look
 - The page background is a **soft multi-stop gradient**; the main content is a **white card** centered on the page, with rounded corners and drop shadow.

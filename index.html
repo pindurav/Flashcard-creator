@@ -289,6 +289,26 @@
           setShowAnswer((s) => !s);
         }
 
+        // After revealing the answer, keep it visible for a while, then move to the next card.
+        useEffect(() => {
+          if (!showAnswer || flashcards.length === 0) return;
+
+          const indexAtStart = currentIndex;
+          const total = flashcards.length;
+
+          const timer = setTimeout(() => {
+            // Only auto-advance if we're still on the same card and still showing the answer
+            setCurrentIndex((idx) => {
+              if (idx !== indexAtStart) return idx;
+              return (idx + 1) % total;
+            });
+            setShowAnswer(false);
+            setIsReversed(Math.random() < 0.5);
+          }, 20000); // 20 seconds
+
+          return () => clearTimeout(timer);
+        }, [showAnswer, currentIndex, flashcards.length]);
+
         // Highlight sequences of double letters (ll, tt, etc.) to draw attention.
         function highlightDoubleLetters(text) {
           if (!text) return "";
@@ -337,7 +357,7 @@
             }}
           >
             <h2 style={{ marginTop: 0, marginBottom: "1.5rem", color: "#1f3c88" }}>
-              Flashcard Generator (English - Czech)
+              Flashcard game! (Eg english - Czech learning helper)
             </h2>
 
             <div
@@ -533,8 +553,12 @@
                     cursor: "pointer",
                     marginBottom: 20,
                     boxShadow: "0 14px 30px rgba(0,0,0,0.12)",
-                    transition: "transform 0.18s ease, box-shadow 0.18s ease",
-                    transform: showAnswer ? "rotateY(6deg)" : "rotateY(-4deg)",
+                    transition:
+                      "transform 0.25s ease, box-shadow 0.18s ease, opacity 0.25s ease",
+                    transform: showAnswer
+                      ? "rotateY(6deg) scale(0.97)"
+                      : "rotateY(-4deg) scale(1)",
+                    opacity: showAnswer ? 0.9 : 1,
                   }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.transform =
@@ -544,8 +568,8 @@
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.transform = showAnswer
-                      ? "rotateY(6deg)"
-                      : "rotateY(-4deg)";
+                      ? "rotateY(6deg) scale(0.97)"
+                      : "rotateY(-4deg) scale(1)";
                     e.currentTarget.style.boxShadow = "0 14px 30px rgba(0,0,0,0.12)";
                   }}
                   onClick={handleFlip}
