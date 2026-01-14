@@ -107,6 +107,7 @@ This document summarizes how the current flashcard generator works so Cursor (an
       - Attempts to copy `window.location.href` to clipboard.
       - Falls back to messaging that the address bar has the link.
   - Below that is the **active card** and controls:
+    - Randomly order the cards - so game is still a bit different
     - Card surface shows either **question** or **answer** depending on `showAnswer` and `isReversed`.
     - Sequences of repeated letters (e.g., `ll`, `tt`) are wrapped in a `<span>` with a light yellow background via `highlightDoubleLetters()`.
     - Controls: **Prev**, **Next**, **Show Question / Show Answer**.

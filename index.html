@@ -31,6 +31,15 @@
         const [sourceInfo, setSourceInfo] = useState("Paste CSV / tab text or load an .xlsx file.");
         const [showCreator, setShowCreator] = useState(true);
 
+        function shuffleArray(array) {
+          const copy = [...array];
+          for (let i = copy.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [copy[i], copy[j]] = [copy[j], copy[i]];
+          }
+          return copy;
+        }
+
         function Step({ number, label, isActive, isDone, onClick }) {
           const circleStyle = {
             width: 32,
@@ -117,7 +126,7 @@
             if (match && match[1]) {
               const decoded = decodeURIComponent(match[1]);
               setSpreadsheet(decoded);
-              const cards = parseSpreadsheet(decoded);
+              const cards = shuffleArray(parseSpreadsheet(decoded));
               setFlashcards(cards);
               if (cards.length > 0) {
                 setCurrentIndex(0);
@@ -182,7 +191,8 @@
             try {
               const data = new Uint8Array(e.target.result);
               const workbook = XLSX.read(data, { type: "array" });
-              const cards = parseXlsxToFlashcards(workbook);
+              const parsedCards = parseXlsxToFlashcards(workbook);
+              const cards = shuffleArray(parsedCards);
               if (cards.length > 0) {
                 const text = cards
                   .map((card) => `${card.front}\t${card.back}`)
@@ -212,7 +222,7 @@
         }
 
         function handleGenerate() {
-          const cards = parseSpreadsheet(spreadsheet);
+          const cards = shuffleArray(parseSpreadsheet(spreadsheet));
           setFlashcards(cards);
           setCurrentIndex(0);
           setShowAnswer(false);
