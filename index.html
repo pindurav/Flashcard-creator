@@ -38,6 +38,7 @@
         const [cardOrderMode, setCardOrderMode] = useState("questionFirst"); // "questionFirst", "answerFirst", "randomizes"
         const [touchStart, setTouchStart] = useState(null); // For swipe gesture detection
         const [deviceOrientation, setDeviceOrientation] = useState({ beta: 0, gamma: 0 }); // For 3D shadow effect
+        const [lastTapTime, setLastTapTime] = useState(0); // To prevent double-triggering on mobile
 
         function shuffleArray(array) {
           const copy = [...array];
@@ -504,6 +505,13 @@
         }
 
         function handleFlip() {
+          // Prevent double-triggering from touch + click events
+          const now = Date.now();
+          if (now - lastTapTime < 300) {
+            return; // Ignore if flip was triggered recently
+          }
+          setLastTapTime(now);
+          
           setShowAnswer((s) => {
             if (!s) {
               // When showing answer, start shrinking
@@ -543,9 +551,12 @@
           const deltaY = touch.clientY - touchStart.y;
           const minSwipeDistance = 50; // Minimum distance for a swipe
           const maxVerticalDistance = 100; // Max vertical movement to still count as horizontal swipe
+          const totalDistance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
 
           // Check if it's a horizontal swipe (not too much vertical movement)
           if (Math.abs(deltaY) < maxVerticalDistance && Math.abs(deltaX) > minSwipeDistance) {
+            // It's a swipe - navigate to next/prev card
+            e.preventDefault(); // Prevent click event from firing
             if (deltaX > 0) {
               // Swipe right - previous card
               handlePrev();
@@ -553,7 +564,13 @@
               // Swipe left - next card
               handleNext();
             }
+          } else if (totalDistance < 15) {
+            // It's a tap (very small movement) - flip the card
+            // Don't prevent default - let click event also fire for desktop compatibility
+            // But handle it here too for immediate mobile response
+            handleFlip();
           }
+          // If movement is significant but not a clear swipe, let the click event handle it
 
           setTouchStart(null);
         }
