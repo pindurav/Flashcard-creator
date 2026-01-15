@@ -57,6 +57,8 @@ This document summarizes how the current flashcard generator works so Cursor (an
 - `randomMixCards: boolean` – controlled by a checkbox (default: `true`); when `true`, the card order is shuffled randomly.
 - `cardOrderMode: string` – controls which side shows first: `"questionFirst"` (default), `"answerFirst"`, or `"randomizes"` (randomly picks which side shows first for each card).
 - `isMobile: boolean` – simple flag derived from `window.innerWidth` to tweak layout for small screens.
+- `touchStart: { x: number, y: number } | null` – tracks the starting position of touch gestures for swipe detection.
+- `deviceOrientation: { beta: number, gamma: number }` – tracks device tilt angles for dynamic 3D shadow effects (beta: front-to-back, gamma: left-to-right).
 
 #### 3. Parsing pasted text (`parseSpreadsheet`)
 - For each non-empty line:
@@ -141,10 +143,27 @@ This document summarizes how the current flashcard generator works so Cursor (an
       - When you open the shared link, automatically opens it on the Play & Share tab.
   - Below that is the **active card** and controls:
     - Cards are **shuffled into a random order** when they are created if `randomMixCards` is enabled (from pasted text, XLSX upload, or shared URL).
-    - The card surface is a playful, rounded rectangle with:
-      - A light gradient background, pink accent border, drop shadow, and subtle 3D-style rotation that changes on hover.
-      - A small **"Question" / "Answer"** pill in the top-right corner that reflects the current side.
+    - The card surface uses **Apple Liquid Glass design** (glassmorphism):
+      - **Frosted glass effect**: `backdrop-filter: blur(20px) saturate(180%)` creates a translucent, blurred background.
+      - **Semi-transparent gradients**: White gradient backgrounds with varying opacity (35% for question, 25% for answer).
+      - **Subtle borders**: Thin white border with 40% opacity (`rgba(255, 255, 255, 0.4)`).
+      - **Light reflection overlay**: A gradient overlay on the top half simulates light reflection.
+      - **Dynamic 3D shadow**: Shadow direction and intensity adjust based on device orientation:
+        - Uses Device Orientation API to track phone tilt (`beta` for front-to-back, `gamma` for left-to-right).
+        - Shadow offset calculated from tilt angles: `shadowX = gamma * 0.3`, `shadowY = beta * 0.2`.
+        - Shadow blur increases with tilt magnitude for depth effect.
+        - Smoothly transitions as the phone moves (0.3s ease transition).
+        - Falls back to static shadow if orientation API is unavailable or permission denied.
+      - **Layered shadows**: Multiple shadow layers including dynamic shadow, inset border highlight, and ambient glow.
+      - **Rounded corners**: 28px border radius for modern, soft appearance.
+      - A small **"Question" / "Answer"** pill in the top-right corner with glassmorphic styling (backdrop blur, gradient background, inset border).
       - Card content has `translate="no"` attribute to prevent browser auto-translation.
+      - **Swipe gestures for mobile**: 
+        - Swipe **left** → Next card (calls `handleNext()`).
+        - Swipe **right** → Previous card (calls `handlePrev()`).
+        - Minimum swipe distance: 50px to trigger navigation.
+        - Allows up to 100px vertical movement to still count as horizontal swipe.
+        - Prevents default scrolling only when clearly a horizontal swipe gesture.
     - Card content shows either **question** or **answer** depending on `showAnswer` and `isReversed`.
     - The initial side shown for each card is determined by `cardOrderMode`:
       - `"questionFirst"`: Always shows question (front) side first.
@@ -158,7 +177,10 @@ This document summarizes how the current flashcard generator works so Cursor (an
         - Sets the initial display based on `cardOrderMode` (respecting the mode's rules for which side shows first).
     - Sequences of repeated letters (e.g., `ll`, `tt`) are wrapped in a `<span>` with a light yellow background via `highlightDoubleLetters()`.
     - Controls: **Prev**, **Next**, **Show Question / Show Answer**.
-    - Clicking **Next** or **Prev** immediately displays the new card (no delay):
+    - **Navigation methods**:
+      - **Clicking** **Next** or **Prev** buttons immediately displays the new card (no delay).
+      - **Swipe gestures** on mobile: swipe left for next, swipe right for previous (same behavior as button clicks).
+    - When navigating (via button or swipe):
       - Resets `shrinkScale` to 1.0,
       - Changes to the new card index,
       - Sets initial display based on `cardOrderMode`:
@@ -166,10 +188,27 @@ This document summarizes how the current flashcard generator works so Cursor (an
         - `"answerFirst"`: Shows answer side, `isReversed = false`.
         - `"randomizes"`: Randomly picks which side, sets `isReversed` accordingly.
 
+#### 8. Device orientation and touch gestures
+- **Device orientation tracking**:
+  - A `useEffect` hook listens to `deviceorientation` events.
+  - On iOS 13+, requests permission via `DeviceOrientationEvent.requestPermission()`.
+  - Tracks `beta` (front-to-back tilt) and `gamma` (left-to-right tilt) angles.
+  - Updates `deviceOrientation` state which drives the dynamic shadow calculation.
+  - Falls back gracefully if the API is unavailable or permission is denied.
+- **Touch gesture handlers**:
+  - `handleTouchStart`: Records initial touch position in `touchStart` state.
+  - `handleTouchMove`: Prevents default scrolling when a horizontal swipe is detected.
+  - `handleTouchEnd`: Calculates swipe direction and distance, calls `handleNext()` or `handlePrev()` accordingly.
+  - Minimum swipe distance: 50px horizontal movement.
+  - Maximum vertical tolerance: 100px (swipes with more vertical movement are ignored).
+
 ### Things to be careful about in future edits
 - `index.html` mixes **layout**, **logic**, and **state** in one file; large structural refactors should first split the script into a separate `.js` file.
 - Changing the shape of `flashcards` or how `front`/`back` are constructed requires syncing:
   - Text parsing, XLSX parsing,
   - URL sharing logic,
   - Card rendering and random direction logic.
-- If you update CDN URLs (React / ReactDOM / xlsx / Babel), make sure versions are compatible and still expose the same globals (`React`, `ReactDOM`, `XLSX`, `Babel`).
+- The **dynamic shadow calculation** depends on `deviceOrientation` state; ensure it updates reactively when orientation changes.
+- **Swipe gesture detection** uses touch events; be careful when modifying touch handlers to maintain swipe functionality.
+- **Device Orientation API** requires user permission on iOS 13+; the code handles permission requests gracefully.
+- If you update CDN URLs (React / ReactDOM / xlsx / Babel / LZString), make sure versions are compatible and still expose the same globals (`React`, `ReactDOM`, `XLSX`, `Babel`, `LZString`).
