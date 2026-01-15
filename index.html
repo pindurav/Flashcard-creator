@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" translate="no">
   <head>
     <meta charset="UTF-8" />
     <title>Flashcard Generator</title>
@@ -33,8 +33,9 @@
         const [sourceInfo, setSourceInfo] = useState("Paste CSV / tab text or load an .xlsx file.");
         const [showCreator, setShowCreator] = useState(true);
         const [shrinkScale, setShrinkScale] = useState(1.0); // For gradual shrinking during auto-advance
-        const [randomMixEnabled, setRandomMixEnabled] = useState(true); // Checkbox for randomizing question/answer
+        const [randomMixCards, setRandomMixCards] = useState(true); // Checkbox for randomly shuffling card order (default: true)
         const [isMobile, setIsMobile] = useState(false); // For responsive tweaks
+        const [cardOrderMode, setCardOrderMode] = useState("questionFirst"); // "questionFirst", "answerFirst", "randomizes"
 
         function shuffleArray(array) {
           const copy = [...array];
@@ -96,21 +97,34 @@
         function updateUrlFromSpreadsheet(text) {
           try {
             const raw = text || "";
+            let hash = "";
             // Prefer compressed format when possible to keep URLs shorter.
             if (window.LZString && typeof window.LZString.compressToEncodedURIComponent === "function") {
               const compressed = window.LZString.compressToEncodedURIComponent(raw);
               if (compressed && compressed.length > 0) {
-                window.location.hash = "lz=" + compressed;
-                return;
+                hash = "lz=" + compressed;
               }
             }
             // Fallback: plain URI encoding (legacy format).
-            const encoded = encodeURIComponent(raw);
-            if (encoded) {
-              window.location.hash = "data=" + encoded;
-            } else {
-              window.location.hash = "";
+            if (!hash) {
+              const encoded = encodeURIComponent(raw);
+              if (encoded) {
+                hash = "data=" + encoded;
+              }
             }
+            // Add cardOrderMode setting to URL (only if not default "questionFirst")
+            if (hash && cardOrderMode !== "questionFirst") {
+              hash += "&order=" + encodeURIComponent(cardOrderMode);
+            } else if (cardOrderMode !== "questionFirst") {
+              hash = "order=" + encodeURIComponent(cardOrderMode);
+            }
+            // Add randomMixCards setting to URL (only if false, since default is true)
+            if (hash && !randomMixCards) {
+              hash += "&mixCards=0";
+            } else if (!randomMixCards) {
+              hash = "mixCards=0";
+            }
+            window.location.hash = hash || "";
           } catch (e) {
             console.error("Failed to encode data into URL", e);
           }
@@ -163,10 +177,40 @@
         // On first load, try to restore from URL hash:
         // - New format:  #lz=<compressed text with LZString.compressToEncodedURIComponent>
         // - Legacy:      #data=<encodeURIComponent text>
+        // - Also supports: &order=<mode> for card ordering mode, &mixCards=1 for random mixing
         useEffect(() => {
           try {
             const hash = window.location.hash || "";
-            const match = hash.match(/^#?(lz|data)=(.*)$/);
+            let loadedMode = "questionFirst";
+            let shouldMixCards = hash.includes("mixCards=1");
+            // Check for order mode
+            const orderMatch = hash.match(/[&?]order=([^&]*)/);
+            if (orderMatch && orderMatch[1]) {
+              const mode = decodeURIComponent(orderMatch[1]);
+              // Support legacy modes for backward compatibility
+              if (mode === "keep" || mode === "cardOrder") {
+                loadedMode = "questionFirst";
+                setCardOrderMode("questionFirst");
+              } else if (mode === "randomize") {
+                // Legacy: randomize mode means randomizes (random side first)
+                loadedMode = "randomizes";
+                setCardOrderMode("randomizes");
+              } else if (["answerFirst", "questionFirst", "randomizes"].includes(mode)) {
+                loadedMode = mode;
+                setCardOrderMode(mode);
+              }
+            }
+            // Check for random mix cards setting (default to true if not specified)
+            if (hash.includes("mixCards=0")) {
+              shouldMixCards = false;
+              setRandomMixCards(false);
+            } else if (shouldMixCards || !hash.includes("mixCards=")) {
+              // Default to true if not specified or explicitly set to 1
+              shouldMixCards = true;
+              setRandomMixCards(true);
+            }
+            // Extract and decode the data
+            const match = hash.match(/^#?(lz|data)=([^&]*)/);
             if (match && match[2]) {
               const [, kind, payload] = match;
               let decoded = "";
@@ -176,12 +220,26 @@
                 decoded = decodeURIComponent(payload);
               }
               setSpreadsheet(decoded);
-              const cards = shuffleArray(parseSpreadsheet(decoded));
+              const parsedCards = parseSpreadsheet(decoded);
+              // Shuffle if randomMixCards is enabled
+              const cards = shouldMixCards ? shuffleArray(parsedCards) : parsedCards;
               setFlashcards(cards);
               if (cards.length > 0) {
                 setCurrentIndex(0);
-                setShowAnswer(false);
-                setIsReversed(randomMixEnabled ? Math.random() < 0.5 : false);
+                // Set initial display based on order mode
+                if (loadedMode === "answerFirst") {
+                  setShowAnswer(true);
+                  setIsReversed(false); // Show answer (back) side
+                } else if (loadedMode === "randomizes") {
+                  // Randomly pick which side shows first
+                  const showAnswerFirst = Math.random() < 0.5;
+                  setShowAnswer(showAnswerFirst);
+                  setIsReversed(showAnswerFirst); // If showing answer, reverse the card
+                } else {
+                  // questionFirst (default)
+                  setShowAnswer(false);
+                  setIsReversed(false); // Show question (front) side
+                }
                 setSourceInfo(`Loaded ${cards.length} cards from URL`);
                 // When opening from a shared link, go straight to the Play tab
                 setShowCreator(false);
@@ -191,6 +249,13 @@
             console.error("Failed to parse data from URL", e);
           }
         }, []);
+
+        // Sync URL when cardOrderMode or randomMixCards changes (if we have flashcards)
+        useEffect(() => {
+          if (flashcards.length > 0 && spreadsheet) {
+            updateUrlFromSpreadsheet(spreadsheet);
+          }
+        }, [cardOrderMode, randomMixCards]);
 
         // Parse first sheet of an uploaded XLSX file.
         // Robust: uses non-empty columns as "cells", first cell(s) = question, last cell = answer.
@@ -244,7 +309,8 @@
               const data = new Uint8Array(e.target.result);
               const workbook = XLSX.read(data, { type: "array" });
               const parsedCards = parseXlsxToFlashcards(workbook);
-              const cards = shuffleArray(parsedCards);
+              // Shuffle if randomMixCards is enabled
+              const cards = randomMixCards ? shuffleArray(parsedCards) : parsedCards;
               if (cards.length > 0) {
                 const text = cards
                   .map((card) => `${card.front}\t${card.back}`)
@@ -252,8 +318,20 @@
                 setSpreadsheet(text);
                 setFlashcards(cards);
                 setCurrentIndex(0);
-                setShowAnswer(false);
-                setIsReversed(randomMixEnabled ? Math.random() < 0.5 : false);
+                // Set initial display based on order mode
+                if (cardOrderMode === "answerFirst") {
+                  setShowAnswer(true);
+                  setIsReversed(false); // Show answer (back) side
+                } else if (cardOrderMode === "randomizes") {
+                  // Randomly pick which side shows first
+                  const showAnswerFirst = Math.random() < 0.5;
+                  setShowAnswer(showAnswerFirst);
+                  setIsReversed(showAnswerFirst); // If showing answer, reverse the card
+                } else {
+                  // questionFirst (default)
+                  setShowAnswer(false);
+                  setIsReversed(false); // Show question (front) side
+                }
                 updateUrlFromSpreadsheet(text);
                 setSourceInfo(`Loaded ${cards.length} cards from "${file.name}"`);
                 setShowCreator(false);
@@ -280,11 +358,25 @@
           if ((spreadsheet || "").trim().length === 0) {
             setSpreadsheet(placeholderSample);
           }
-          const cards = shuffleArray(parseSpreadsheet(sourceText));
+          const parsedCards = parseSpreadsheet(sourceText);
+          // Shuffle if randomMixCards is enabled
+          const cards = randomMixCards ? shuffleArray(parsedCards) : parsedCards;
           setFlashcards(cards);
           setCurrentIndex(0);
-          setShowAnswer(false);
-          setIsReversed(randomMixEnabled ? Math.random() < 0.5 : false);
+          // Set initial display based on order mode
+          if (cardOrderMode === "answerFirst") {
+            setShowAnswer(true);
+            setIsReversed(false); // Show answer (back) side
+          } else if (cardOrderMode === "randomizes") {
+            // Randomly pick which side shows first
+            const showAnswerFirst = Math.random() < 0.5;
+            setShowAnswer(showAnswerFirst);
+            setIsReversed(showAnswerFirst); // If showing answer, reverse the card
+          } else {
+            // questionFirst (default)
+            setShowAnswer(false);
+            setIsReversed(false); // Show question (front) side
+          }
           updateUrlFromSpreadsheet(sourceText);
           if (cards.length > 0) {
             setSourceInfo(
@@ -333,18 +425,42 @@
           if (flashcards.length > 0) {
             // Immediately show the new card (no delay)
             setShrinkScale(1.0); // Reset scale first
-            setShowAnswer(false); // Hide answer immediately
             setCurrentIndex((idx) => (idx + 1) % flashcards.length); // Change card
-            setIsReversed(randomMixEnabled ? Math.random() < 0.5 : false); // Randomize direction
+            // Set initial display based on order mode
+            if (cardOrderMode === "answerFirst") {
+              setShowAnswer(true);
+              setIsReversed(false); // Show answer (back) side
+            } else if (cardOrderMode === "randomizes") {
+              // Randomly pick which side shows first
+              const showAnswerFirst = Math.random() < 0.5;
+              setShowAnswer(showAnswerFirst);
+              setIsReversed(showAnswerFirst); // If showing answer, reverse the card
+            } else {
+              // questionFirst (default)
+              setShowAnswer(false);
+              setIsReversed(false); // Show question (front) side
+            }
           }
         }
 
         function handlePrev() {
           if (flashcards.length > 0) {
+            setShrinkScale(1.0); // Reset scale first
             setCurrentIndex((idx) => (idx - 1 + flashcards.length) % flashcards.length);
-            setShowAnswer(false);
-            setIsReversed(randomMixEnabled ? Math.random() < 0.5 : false);
-            setShrinkScale(1.0); // Reset scale when manually navigating
+            // Set initial display based on order mode
+            if (cardOrderMode === "answerFirst") {
+              setShowAnswer(true);
+              setIsReversed(false); // Show answer (back) side
+            } else if (cardOrderMode === "randomizes") {
+              // Randomly pick which side shows first
+              const showAnswerFirst = Math.random() < 0.5;
+              setShowAnswer(showAnswerFirst);
+              setIsReversed(showAnswerFirst); // If showing answer, reverse the card
+            } else {
+              // questionFirst (default)
+              setShowAnswer(false);
+              setIsReversed(false); // Show question (front) side
+            }
           }
         }
 
@@ -398,8 +514,20 @@
               if (idx !== indexAtStart) return idx;
               return (idx + 1) % total;
             });
-            setShowAnswer(false);
-            setIsReversed(randomMixEnabled ? Math.random() < 0.5 : false);
+            // Set initial display for next card based on order mode
+            if (cardOrderMode === "answerFirst") {
+              setShowAnswer(true);
+              setIsReversed(false); // Show answer (back) side
+            } else if (cardOrderMode === "randomizes") {
+              // Randomly pick which side shows first
+              const showAnswerFirst = Math.random() < 0.5;
+              setShowAnswer(showAnswerFirst);
+              setIsReversed(showAnswerFirst); // If showing answer, reverse the card
+            } else {
+              // questionFirst (default)
+              setShowAnswer(false);
+              setIsReversed(false); // Show question (front) side
+            }
             setShrinkScale(1.0); // Reset scale for next card
           }, duration);
 
@@ -407,7 +535,7 @@
             clearTimeout(timer);
             clearInterval(interval);
           };
-        }, [showAnswer, currentIndex, flashcards.length, randomMixEnabled]);
+        }, [showAnswer, currentIndex, flashcards.length, cardOrderMode]);
 
         // Highlight sequences of double letters (ll, tt, etc.) to draw attention.
         function highlightDoubleLetters(text) {
@@ -565,11 +693,31 @@
                   <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.75rem" }}>
                     <input
                       type="checkbox"
-                      checked={randomMixEnabled}
-                      onChange={(e) => setRandomMixEnabled(e.target.checked)}
+                      checked={randomMixCards}
+                      onChange={(e) => setRandomMixCards(e.target.checked)}
                       style={{ width: "18px", height: "18px", cursor: "pointer" }}
                     />
-                    <span style={{ fontSize: "0.95rem" }}>Randomly mix question/answers</span>
+                    <span style={{ fontSize: "0.95rem" }}>Randomly mix cards</span>
+                  </label>
+                  <label style={{ display: "block", marginBottom: "0.5rem" }}>
+                    <span style={{ fontSize: "0.95rem", display: "block", marginBottom: "0.25rem" }}>Card order:</span>
+                    <select
+                      value={cardOrderMode}
+                      onChange={(e) => setCardOrderMode(e.target.value)}
+                      style={{
+                        width: "100%",
+                        padding: "0.5rem",
+                        borderRadius: "8px",
+                        border: "1px solid #ccc",
+                        fontSize: "0.95rem",
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                      }}
+                    >
+                      <option value="questionFirst">Question first</option>
+                      <option value="answerFirst">Answer first</option>
+                      <option value="randomizes">Randomizes</option>
+                    </select>
                   </label>
                 </div>
                 <div style={{ margin: "1rem 0", display: "flex", gap: "0.75rem" }}>
@@ -706,7 +854,7 @@
                   >
                     {showAnswer ? "Answer" : "Question"}
                   </div>
-                  <div style={{ textAlign: "center", lineHeight: 1.3 }}>
+                  <div style={{ textAlign: "center", lineHeight: 1.3 }} translate="no">
                     {showAnswer
                       ? highlightDoubleLetters(answer)
                       : highlightDoubleLetters(question)}

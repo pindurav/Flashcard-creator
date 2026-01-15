@@ -9,7 +9,8 @@ This document summarizes how the current flashcard generator works so Cursor (an
 - **Stack**: Plain browser app using React 18 and ReactDOM from CDN, compiled with in-browser Babel.
 - **Main file**: `index.html`.
 - **React component**: `FlashcardApp` is declared inline inside a `<script type="text/babel">` tag.
-- **Storage / sharing**: Encodes the source text into the URL hash so decks are shareable by link.
+- **Storage / sharing**: Encodes the source text into the URL hash so decks are shareable by link. Also stores card order mode and mix settings in the URL.
+- **Auto-translate prevention**: The HTML element and card content have `translate="no"` to prevent browser auto-translation.
 
 ### Running the app
 - From a terminal in Cursor:
@@ -53,7 +54,8 @@ This document summarizes how the current flashcard generator works so Cursor (an
 - `sourceInfo: string` – status message under the heading.
 - `showCreator: boolean` – whether the upload/paste panel is visible.
 - `shrinkScale: number` – scale factor used to gradually shrink the card before auto-advancing.
-- `randomMixEnabled: boolean` – controlled by a checkbox; when `true`, question/answer sides are randomized each card, otherwise they are fixed (front = question, back = answer).
+- `randomMixCards: boolean` – controlled by a checkbox (default: `true`); when `true`, the card order is shuffled randomly.
+- `cardOrderMode: string` – controls which side shows first: `"questionFirst"` (default), `"answerFirst"`, or `"randomizes"` (randomly picks which side shows first for each card).
 - `isMobile: boolean` – simple flag derived from `window.innerWidth` to tweak layout for small screens.
 
 #### 3. Parsing pasted text (`parseSpreadsheet`)
@@ -79,8 +81,9 @@ This document summarizes how the current flashcard generator works so Cursor (an
 - The file-upload handler:
   - Converts parsed cards back into text: `front + "\t" + back` per line.
   - Updates `spreadsheet`, `flashcards`, and navigation state.
-  - Randomizes `isReversed`, resets `showAnswer` to `false`, sets `currentIndex` to `0`.
-  - Updates the URL hash (`#data=...`) with the new text.
+  - Shuffles cards if `randomMixCards` is enabled.
+  - Sets initial display based on `cardOrderMode` (respects the mode's rules for which side shows first).
+  - Updates the URL hash (including order and mixCards settings) with the new text.
   - Collapses the creator (`showCreator = false`) and updates `sourceInfo` with how many cards were loaded.
 
 #### 5. URL-based sharing
@@ -88,31 +91,43 @@ This document summarizes how the current flashcard generator works so Cursor (an
   - Uses **LZString compression** (from CDN) to compress the `spreadsheet` string.
   - Stores the compressed data in `window.location.hash` as `#lz=...` (much shorter than raw encoding).
   - Falls back to `#data=...` format if compression is unavailable.
+  - Adds `&order=<mode>` to the URL if `cardOrderMode` is not the default (`"questionFirst"`).
+  - Adds `&mixCards=0` to the URL if `randomMixCards` is `false` (default is `true`, so only stored when disabled).
   - Clears the hash when the input is emptied.
 - On first render, a `useEffect` hook:
   - Reads `window.location.hash`.
   - If it matches `#lz=...`, decompresses using `LZString.decompressFromEncodedURIComponent`.
   - If it matches `#data=...`, uses `decodeURIComponent` (backward compatibility).
-  - Immediately parses the decoded text into `flashcards`, randomizes `isReversed`, resets index/flip state, and updates `sourceInfo` to indicate the deck came from URL.
+  - Extracts `order` parameter to set `cardOrderMode` (supports legacy `"keep"` and `"randomize"` for backward compatibility).
+  - Extracts `mixCards` parameter to set `randomMixCards` (defaults to `true` if not specified).
+  - Immediately parses the decoded text into `flashcards`, shuffles if `randomMixCards` is enabled, sets initial display based on `cardOrderMode`, and updates `sourceInfo` to indicate the deck came from URL.
   - Automatically opens the Play & Share tab when loading from a shared URL.
 
-#### 6. Generate / clear controls and randomization toggle
+#### 6. Generate / clear controls and card ordering
 - In the creator panel, below the textarea:
-  - A **“Randomly mix question/answers”** checkbox (checked by default):
-    - Binds to `randomMixEnabled`.
-    - When enabled, new cards and navigation will randomly flip which side is the question.
-    - When disabled, the **front** side is always shown as the question.
+  - A **"Randomly mix cards"** checkbox (checked by default):
+    - Binds to `randomMixCards`.
+    - When enabled, the card order is shuffled randomly when generating or loading flashcards.
+    - When disabled, cards maintain their original order.
+  - A **"Card order"** dropdown with three options:
+    - **"Question first"** (default): Always shows the question (front) side first for each card.
+    - **"Answer first"**: Always shows the answer (back) side first for each card.
+    - **"Randomizes"**: Randomly picks which side (question or answer) shows first for each card.
   - A **horizontal button group**:
     - **Clear inputs** (gray):
       - Sets `spreadsheet` to empty, clears `flashcards`, index, flip state and `isReversed`.
-      - Resets `sourceInfo` to an “inputs cleared” message.
+      - Resets `sourceInfo` to an "inputs cleared" message.
       - Clears the URL hash as well.
     - **Generate flashcards** (blue, CTA):
       - Calls `handleGenerate()`.
       - If the textarea is empty, automatically uses a **sample placeholder deck** (`apple, jablko` / `car, auto`) and writes it into `spreadsheet`.
-      - Uses `parseSpreadsheet()` to build the `flashcards` array and shuffles them.
-      - Resets index and flip state; sets `isReversed` based on `randomMixEnabled`.
-      - Updates the URL hash from the chosen source text.
+      - Uses `parseSpreadsheet()` to build the `flashcards` array.
+      - Shuffles the cards if `randomMixCards` is enabled.
+      - Sets initial display based on `cardOrderMode`:
+        - `"questionFirst"`: Shows question (front) side, `isReversed = false`.
+        - `"answerFirst"`: Shows answer (back) side, `isReversed = false`.
+        - `"randomizes"`: Randomly picks which side, sets `isReversed` accordingly.
+      - Updates the URL hash from the chosen source text (including order and mixCards settings).
       - Collapses the creator to show the Play & Share state on success.
 
 #### 7. Play & share panel and card view
@@ -125,25 +140,31 @@ This document summarizes how the current flashcard generator works so Cursor (an
       - Always shows the message: **"The URL copied!"** in `sourceInfo`.
       - When you open the shared link, automatically opens it on the Play & Share tab.
   - Below that is the **active card** and controls:
-    - Cards are **shuffled into a random order** when they are created (from pasted text, XLSX upload, or shared URL), so each game run feels a bit different.
+    - Cards are **shuffled into a random order** when they are created if `randomMixCards` is enabled (from pasted text, XLSX upload, or shared URL).
     - The card surface is a playful, rounded rectangle with:
       - A light gradient background, pink accent border, drop shadow, and subtle 3D-style rotation that changes on hover.
-      - A small **“Question” / “Answer”** pill in the top-right corner that reflects the current side.
+      - A small **"Question" / "Answer"** pill in the top-right corner that reflects the current side.
+      - Card content has `translate="no"` attribute to prevent browser auto-translation.
     - Card content shows either **question** or **answer** depending on `showAnswer` and `isReversed`.
+    - The initial side shown for each card is determined by `cardOrderMode`:
+      - `"questionFirst"`: Always shows question (front) side first.
+      - `"answerFirst"`: Always shows answer (back) side first.
+      - `"randomizes"`: Randomly picks which side shows first for each card.
     - When the answer is shown:
       - It stays visible for ~10 seconds.
       - After ~2 seconds it **gradually shrinks** (using `shrinkScale`) down to about 70% size and slightly fades, signaling that the card will disappear.
       - At the end of the 10 seconds the game automatically:
         - Advances to the next card,
-        - Hides the answer again,
-        - Picks a new `isReversed` value according to `randomMixEnabled`.
+        - Sets the initial display based on `cardOrderMode` (respecting the mode's rules for which side shows first).
     - Sequences of repeated letters (e.g., `ll`, `tt`) are wrapped in a `<span>` with a light yellow background via `highlightDoubleLetters()`.
     - Controls: **Prev**, **Next**, **Show Question / Show Answer**.
     - Clicking **Next** or **Prev** immediately displays the new card (no delay):
       - Resets `shrinkScale` to 1.0,
-      - Hides the answer (`showAnswer = false`),
       - Changes to the new card index,
-      - Randomizes `isReversed` (subject to `randomMixEnabled`).
+      - Sets initial display based on `cardOrderMode`:
+        - `"questionFirst"`: Shows question side, `isReversed = false`.
+        - `"answerFirst"`: Shows answer side, `isReversed = false`.
+        - `"randomizes"`: Randomly picks which side, sets `isReversed` accordingly.
 
 ### Things to be careful about in future edits
 - `index.html` mixes **layout**, **logic**, and **state** in one file; large structural refactors should first split the script into a separate `.js` file.
